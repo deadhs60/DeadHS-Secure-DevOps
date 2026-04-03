@@ -1,0 +1,124 @@
+name: Secure DevOps Pipeline
+
+permissions:
+  contents: read
+  actions: write
+  checks: write
+  id-token: write
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Run App
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        run: |
+          cd app
+          pip install -r requirements.txt
+          python init_db.py || true
+          python app.py & sleep 5
+          curl http://127.0.0.1:5000
+
+  sast:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run SAST Scan
+        run: |
+          semgrep --config=p/owasp-top-ten \
+                  --config=p/python \
+                  --error \
+                  --exclude tests \
+                  app/
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run Secret Scan
+        run: |
+          docker run --rm \
+          -v ${{ github.workspace }}/app:/repo \
+          ghcr.io/trufflesecurity/trufflehog:latest \
+          filesystem /repo --fail
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Install Dependencies
+        run: |
+          cd app
+          pip install -r requirements.txt
+
+      - name: Run Dependency Scan
+        run: pip-audit -r app/requirements.txt --strict
+
+  dast:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Fix permissions
+        run: chmod -R 777 .
+
+      - name: Run ZAP Scan
+        run: |
+          docker run --rm \
+          -v $(pwd):/zap/wrk/:rw \
+          --network=host \
+          ghcr.io/zaproxy/zaproxy:stable \
+          zap-baseline.py \
+          -t https://sandee-nonpermitted-uncontemningly.ngrok-free.dev \
+          -r report_html.html
+
+      # ✅ SHOW REPORT IN LOGS
+      - name: Display Report Summary
+        run: |
+          echo "===== ZAP REPORT ====="
+          cat report_html.html || echo "Report not found"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, sast, secret-scan, dependency-scan]
+    if: success()
+    environment: production
+
+    steps:
+      - name: Deploy
+        run: echo "Deploying..."
