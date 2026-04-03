@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Secure DevOps Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<h1>🔐 Secure DevOps Pipeline Dashboard</h1>
+
+<div class="container">
+
+    <h2>Manual Scans</h2>
+    <button onclick="runScan('semgrep')">Run SAST (Semgrep)</button>
+    <button onclick="runScan('dependency')">Run Dependency Scan</button>
+    <button onclick="runScan('secret')">Run Secret Scan</button>
+
+    <h2>Automated Scan</h2>
+    <button onclick="runScan('zap')">Run ZAP Scan</button>
+
+    <h2>Output</h2>
+    <pre id="output"></pre>
+
+</div>
+
+<script>
+function runScan(type) {
+    fetch(`/scan/${type}`)
+    .then(res => res.text())
+    .then(data => {
+        document.getElementById("output").innerText = data;
+    });
+}
+</script>
+
+</body>
+</html>
